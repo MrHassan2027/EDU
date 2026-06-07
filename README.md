@@ -19,7 +19,7 @@ A professional PyQt6 desktop application for educators and live-streamers. Scan 
 
 ## Screenshots
 
-![Dashboard](icon_preview.png)
+![Dashboard](screenshot.png)
 
 ---
 
