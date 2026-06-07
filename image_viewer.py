@@ -1,3 +1,6 @@
+# Copyright © 2026 Mr. Hassan — https://mrhassan-dev.vercel.app/
+# All rights reserved. Unauthorized use or distribution is prohibited.
+
 from PyQt6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem
 from PyQt6.QtGui import QPixmap, QWheelEvent, QPainter
 from PyQt6.QtCore import Qt

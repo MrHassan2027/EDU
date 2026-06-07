@@ -1,3 +1,6 @@
+# Copyright © 2026 Mr. Hassan — https://mrhassan-dev.vercel.app/
+# All rights reserved. Unauthorized use or distribution is prohibited.
+
 import sys
 import os
 import math

@@ -1,3 +1,6 @@
+# Copyright © 2026 Mr. Hassan — https://mrhassan-dev.vercel.app/
+# All rights reserved. Unauthorized use or distribution is prohibited.
+
 from PyQt6.QtWidgets import QWidget
 from PyQt6.QtGui import QPainter, QPen, QPainterPath, QColor, QCursor
 from PyQt6.QtCore import Qt, QPointF
