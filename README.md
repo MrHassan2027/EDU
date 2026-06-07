@@ -44,7 +44,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-Or use the prebuilt `EduMediaViewer.exe` (Windows, no Python needed).
+Or **[download the prebuilt EduMediaViewer.exe](https://github.com/etetoo2026/EDU/releases/tag/v1.0)** (Windows, no Python needed).
 
 ---
 
