@@ -94,7 +94,14 @@ class PDFViewer(QWidget):
     def load(self, path: str):
         if self._doc:
             self._doc.close()
-        self._doc = fitz.open(path)
+            self._doc = None
+        try:
+            self._doc = fitz.open(path)
+        except Exception as exc:
+            self._page_lbl.setText(f"Error: {exc}")
+            self._btn_prev.setEnabled(False)
+            self._btn_next.setEnabled(False)
+            return
         self._page_num = 0
         self._view.resetTransform()
         self._view_scale = 1.0
@@ -110,7 +117,9 @@ class PDFViewer(QWidget):
         page = self._doc[self._page_num]
         mat = fitz.Matrix(_RENDER_DPI, _RENDER_DPI)
         pix = page.get_pixmap(matrix=mat, alpha=False)
-        img = QImage(pix.samples_ptr, pix.width, pix.height,
+        # Copy samples into a bytes object so QImage doesn't hold a dangling pointer
+        # when pix is garbage-collected after this scope.
+        img = QImage(bytes(pix.samples), pix.width, pix.height,
                      pix.stride, QImage.Format.Format_RGB888)
         pixmap = QPixmap.fromImage(img)
 

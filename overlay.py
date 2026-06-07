@@ -92,7 +92,9 @@ class DrawingOverlay(QWidget):
         painter.setPen(pen)
 
         if len(points) == 1:
-            painter.drawPoint(points[0])
+            r = width / 2
+            painter.setBrush(color)
+            painter.drawEllipse(points[0], r, r)
             return
 
         path = QPainterPath()

@@ -11,7 +11,9 @@ from PyQt6.QtCore import Qt, QUrl
 
 def _fmt_ms(ms: int) -> str:
     s = ms // 1000
-    return f"{s // 60}:{s % 60:02d}"
+    h, remainder = divmod(s, 3600)
+    m, s = divmod(remainder, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
 
 class VideoPlayer(QWidget):
@@ -94,11 +96,19 @@ class VideoPlayer(QWidget):
     # ── Slots ────────────────────────────────────────────────────────────────
 
     def load(self, path: str):
+        # Reset mute state so each new file starts unmuted
+        if self._btn_mute.isChecked():
+            self._btn_mute.setChecked(False)
+            self._btn_mute.setText("🔊")
+            self._audio.setMuted(False)
         self._player.setSource(QUrl.fromLocalFile(path))
         self._player.play()
 
     def stop(self):
         self._player.stop()
+        self._btn_play.setText("▶  Play")
+        self._time_lbl.setText("0:00 / 0:00")
+        self._seek.setValue(0)
 
     def _toggle_play(self):
         if self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
@@ -115,7 +125,9 @@ class VideoPlayer(QWidget):
         self._btn_play.setText("⏸  Pause" if playing else "▶  Play")
 
     def _on_position(self, pos: int):
+        self._seek.blockSignals(True)
         self._seek.setValue(pos)
+        self._seek.blockSignals(False)
         self._time_lbl.setText(f"{_fmt_ms(pos)} / {_fmt_ms(self._player.duration())}")
 
     def _on_duration(self, dur: int):

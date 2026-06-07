@@ -22,6 +22,9 @@ def scan_folder(path: str, recursive: bool = True) -> dict:
         "images": [], "videos": [], "pdfs": []
     }
 
+    if not os.path.isdir(path):
+        return result
+
     if recursive:
         walk_iter = os.walk(path)
     else:

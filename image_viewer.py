@@ -45,5 +45,5 @@ class ImageViewer(QGraphicsView):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if self._pixmap_item and self._zoom == 1.0:
+        if self._pixmap_item and abs(self._zoom - 1.0) < 0.01:
             self.fitInView(self._pixmap_item, Qt.AspectRatioMode.KeepAspectRatio)

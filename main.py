@@ -40,6 +40,16 @@ _COLORS = [
 
 _WIDTHS = [("S", 2), ("M", 4), ("L", 8)]
 
+_IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+_VIDEO_EXT = {".mp4", ".mkv", ".mov", ".avi"}
+
+
+def _media_type(path: str) -> str:
+    ext = os.path.splitext(path)[1].lower()
+    if ext in _IMAGE_EXT: return "images"
+    if ext in _VIDEO_EXT: return "videos"
+    return "pdfs"
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -63,8 +73,6 @@ def _make_list(context_menu_cb=None) -> QListWidget:
 # ── Main Window ───────────────────────────────────────────────────────────────
 
 class MainWindow(QMainWindow):
-    _16x9 = False
-
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Educational Media Viewer — Stream Dashboard")
@@ -242,17 +250,6 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(12, 4, 12, 4)
         layout.setSpacing(6)
 
-        # Aspect ratio
-        self._btn_ratio = QPushButton("Aspect: Fit")
-        self._btn_ratio.setCheckable(True)
-        self._btn_ratio.setToolTip("Toggle Fit / 9:16 (TikTok) layout")
-        self._btn_ratio.clicked.connect(self._toggle_ratio)
-        layout.addWidget(self._btn_ratio)
-
-        _sep = QLabel("|")
-        _sep.setStyleSheet("color: #333355;")
-        layout.addWidget(_sep)
-
         # Pen toggle
         self._btn_pen = QPushButton("✏  Pen: OFF")
         self._btn_pen.setCheckable(True)
@@ -414,13 +411,8 @@ class MainWindow(QMainWindow):
         if path in self._playlist:
             return
         self._playlist.append(path)
-        ext = os.path.splitext(path)[1].lower()
-        if ext in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
-            badge = "[IMG]"
-        elif ext in {".mp4", ".mkv", ".mov", ".avi"}:
-            badge = "[VID]"
-        else:
-            badge = "[PDF]"
+        mtype = _media_type(path)
+        badge = "[IMG]" if mtype == "images" else "[VID]" if mtype == "videos" else "[PDF]"
         item = QListWidgetItem(f"{len(self._playlist)}. {badge} {os.path.basename(path)}")
         item.setData(Qt.ItemDataRole.UserRole, path)
         item.setToolTip(path)
@@ -434,23 +426,24 @@ class MainWindow(QMainWindow):
         action_remove = menu.addAction("Remove from Queue")
         action = menu.exec(self._queue_list.mapToGlobal(pos))
         if action == action_remove:
+            row = self._queue_list.row(item)
             path = item.data(Qt.ItemDataRole.UserRole)
-            self._playlist.remove(path)
-            self._queue_list.takeItem(self._queue_list.row(item))
+            if path in self._playlist:
+                self._playlist.remove(path)
+            self._queue_list.takeItem(row)
+            # Keep _queue_index pointing at the same logical item after removal
+            if row < self._queue_index:
+                self._queue_index -= 1
+            elif row == self._queue_index:
+                self._queue_index = -1
             self._renumber_queue()
 
     def _renumber_queue(self):
-        self._queue_index = -1
         for i in range(self._queue_list.count()):
             item = self._queue_list.item(i)
             path = item.data(Qt.ItemDataRole.UserRole)
-            ext = os.path.splitext(path)[1].lower()
-            if ext in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
-                badge = "[IMG]"
-            elif ext in {".mp4", ".mkv", ".mov", ".avi"}:
-                badge = "[VID]"
-            else:
-                badge = "[PDF]"
+            mtype = _media_type(path)
+            badge = "[IMG]" if mtype == "images" else "[VID]" if mtype == "videos" else "[PDF]"
             item.setText(f"{i+1}. {badge} {os.path.basename(path)}")
 
     def _clear_queue(self):
@@ -482,11 +475,11 @@ class MainWindow(QMainWindow):
         self._queue_list.setCurrentRow(index)
 
         path = self._playlist[index]
-        ext = os.path.splitext(path)[1].lower()
-        if ext in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
+        mtype = _media_type(path)
+        if mtype == "images":
             self._tabs.setCurrentIndex(0)
             self._img_view.load(path)
-        elif ext in {".mp4", ".mkv", ".mov", ".avi"}:
+        elif mtype == "videos":
             self._tabs.setCurrentIndex(1)
             self._vid_view.load(path)
         else:
@@ -502,13 +495,6 @@ class MainWindow(QMainWindow):
     def _toggle_recursive(self, checked: bool):
         self._recursive = checked
         self._btn_recursive.setText("Recursive: ON" if checked else "Recursive: OFF")
-
-    def _toggle_ratio(self, checked: bool):
-        self._16x9 = checked
-        self._btn_ratio.setText("Aspect: 9:16 (TikTok)" if checked else "Aspect: Fit")
-        self._status_bar.setText(
-            "9:16 layout active — content zone locked for TikTok" if checked else "Aspect ratio: Fit"
-        )
 
     def _toggle_pen(self, checked: bool):
         self._overlay.set_active(checked)
@@ -537,6 +523,11 @@ class MainWindow(QMainWindow):
     def _clear_canvas(self):
         self._overlay.clear()
         self._status_bar.setText("Canvas cleared")
+
+    def closeEvent(self, event):
+        self._anim_timer.stop()
+        self._vid_view.stop()
+        super().closeEvent(event)
 
     # ── Animations ────────────────────────────────────────────────────────────
 
