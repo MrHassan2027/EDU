@@ -1,0 +1,13 @@
+# PyInstaller
+dist/
+build/
+*.spec
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Dev artifacts
+icon_preview.png
+screenshot_*.png
