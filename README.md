@@ -1,62 +1,67 @@
-# Educational Media Viewer — Stream Dashboard
+# EduMediaViewer
 
-A professional PyQt6 desktop application for educators and live-streamers. Scan a folder, browse images, videos, and PDFs in a cinematic dark UI, annotate with a drawing overlay, and queue content for seamless TikTok/live-stream presentations.
+A desktop media viewer for educators and live-streamers. Scan a folder and browse all your images, videos, PDFs, and websites — all in one dark-themed window.
+
+![Screenshot](screenshot.png)
 
 ---
 
 ## Features
 
-- **Folder Scanner** — Recursive or top-level scan for images, videos, and PDFs
-- **Image Viewer** — Pan & zoom with smooth scroll-wheel control
-- **Video Player** — Full playback with seek bar, volume control, and mute toggle
-- **PDF Viewer** — High-DPI rendering, per-page navigation, zoom without blur
-- **Drawing Overlay** — Freehand annotation with color presets, custom color picker, and undo
-- **Stream Queue** — Right-click any file to add to queue; navigate with ◀ ▶ buttons
-- **Live Mode UI** — Pulsing LIVE indicator, broadcast control-room dark theme
-- **Keyboard shortcuts** — `Ctrl+O` open folder · `Ctrl+Z` undo · `Ctrl+L` clear canvas
+| Feature | Details |
+|---------|---------|
+| **Image Viewer** | Pan, zoom (scroll wheel), rotate left/right, fit to window |
+| **Video Player** | Play/pause, seek bar, speed control (0.25× – 2×), volume slider, mute |
+| **PDF Viewer** | Page navigation, zoom in/out, click the page number to jump to any page |
+| **Web Browser** | Browse websites inside the app — no external browser needed. Save bookmarks |
+| **Folder Scanner** | Recursive or single-level scan. Nested folder tree for quick filtering |
+| **Search** | Filter images, videos, or PDFs by filename instantly |
+| **Drawing Overlay** | Draw over any content with pen or eraser. Choose color and stroke size. Undo/redo |
+| **Stream Queue** | Queue files for a presentation. Drag to reorder. Auto-plays the next video |
 
 ---
 
-## Screenshots
+## Download
 
-![Dashboard](screenshot.png)
+**[⬇ Download EduMediaViewer\_v1.0.0.zip](https://github.com/MrHassan2027/EDU/releases/tag/v1.0.0)**
+
+Windows — no Python installation needed.
+
+1. Download and extract the zip
+2. Open the `EduMediaViewer` folder
+3. Run `EduMediaViewer.exe`
 
 ---
 
-## Requirements
+## Keyboard Shortcuts
 
-```
-PyQt6
-PyMuPDF
-```
+| Key | Action |
+|-----|--------|
+| `Ctrl+O` | Open folder |
+| `Ctrl+Z` | Undo drawing |
+| `Ctrl+Y` | Redo drawing |
+| `Ctrl+L` | Clear canvas |
+| `Space` | Play / Pause video |
+| `← →` | Seek video ±5 s &nbsp;/&nbsp; PDF previous/next page |
+| `↑ ↓` | Volume up / down |
+| `Ctrl+← →` | Previous / next image in list |
+| `Ctrl++` / `Ctrl+-` | Zoom PDF in / out |
 
-Install with:
+---
+
+## Run from Source
 
 ```bash
 pip install -r requirements.txt
-```
-
----
-
-## Run
-
-```bash
 python main.py
 ```
 
-Or **[download the prebuilt EduMediaViewer.exe](https://github.com/etetoo2026/EDU/releases/tag/v1.0)** (Windows, no Python needed).
+Requires **Python 3.10+** on Windows.
 
 ---
 
 ## License
 
-Copyright © 2026 **Mr. Hassan**. All rights reserved.
+Copyright © 2026 **Mr. Hassan** — [mrhassan-dev.vercel.app](https://mrhassan-dev.vercel.app/)
 
-This project is the intellectual property of Mr. Hassan. Unauthorized reproduction, distribution, or modification is prohibited without explicit written permission.
-
----
-
-## Author
-
-**Mr. Hassan**  
-Portfolio: [mrhassan-dev.vercel.app](https://mrhassan-dev.vercel.app/)
+All rights reserved. Unauthorized use or distribution is prohibited.

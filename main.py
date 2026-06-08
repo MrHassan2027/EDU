@@ -172,6 +172,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(4)
 
         btn_folder = QPushButton("  Choose Folder")
+        btn_folder.setObjectName("btnChooseFolder")
         btn_folder.setFixedHeight(34)
         btn_folder.clicked.connect(self._on_choose_folder)
         layout.addWidget(btn_folder)
@@ -180,10 +181,11 @@ class MainWindow(QMainWindow):
         rec_row = QHBoxLayout()
         rec_row.setSpacing(4)
         self._btn_recursive = QPushButton("Recursive: ON")
+        self._btn_recursive.setObjectName("btnRecursive")
         self._btn_recursive.setCheckable(True)
         self._btn_recursive.setChecked(True)
         self._btn_recursive.setFixedHeight(22)
-        self._btn_recursive.setStyleSheet("font-size: 10px; padding: 2px 6px;")
+        self._btn_recursive.setStyleSheet("")
         self._btn_recursive.setToolTip(
             "ON = scan all subfolders\nOFF = only files directly in chosen folder"
         )

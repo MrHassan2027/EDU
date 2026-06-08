@@ -247,6 +247,58 @@ QScrollBar::handle:horizontal:hover { background: #e94560; }
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
 QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }
 
+/* ── Primary "Choose Folder" button ─────────────────────────── */
+QPushButton#btnChooseFolder {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #2a5298,
+        stop:0.5 #1e3e7a,
+        stop:1 #142d5c);
+    color: #dce8ff;
+    border-top:    1px solid #4a7cd8;
+    border-left:   1px solid #3060b0;
+    border-right:  1px solid #0a1c40;
+    border-bottom: 2px solid #071020;
+    border-radius: 4px;
+    font-size: 13px;
+    font-weight: bold;
+    letter-spacing: 1px;
+}
+QPushButton#btnChooseFolder:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #3a6ab8,
+        stop:1 #1e3e7a);
+    color: #ffffff;
+    border-top:    1px solid #6090e8;
+    border-bottom: 2px solid #050e20;
+}
+QPushButton#btnChooseFolder:pressed {
+    background: #0e2050;
+    padding-top: 7px;
+    padding-bottom: 3px;
+}
+
+/* ── Recursive toggle — blue when ON, dim when OFF ───────────── */
+QPushButton#btnRecursive {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #131830, stop:1 #0c1020);
+    color: #384068;
+    border: 1px solid #141c38;
+    border-radius: 3px;
+    font-size: 10px;
+    padding: 2px 6px;
+}
+QPushButton#btnRecursive:checked {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #1e3e7a, stop:1 #142d5c);
+    color: #8ab4f8;
+    border: 1px solid #3060b0;
+    font-weight: bold;
+}
+QPushButton#btnRecursive:hover {
+    border-color: #4a7cd8;
+    color: #aac4f8;
+}
+
 /* ── Bottom toolbar ──────────────────────────────────────────── */
 #toolbar {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
