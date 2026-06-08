@@ -4,13 +4,13 @@
 import fitz
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QGraphicsView, QGraphicsScene
+    QGraphicsView, QGraphicsScene, QInputDialog
 )
 from PyQt6.QtGui import QPixmap, QImage, QPainter, QWheelEvent, QShortcut, QKeySequence
 from PyQt6.QtCore import Qt
 
-# Render PDF pages at this DPI multiplier — high enough for sharp text at any zoom.
-_RENDER_DPI = 3.0
+# Render PDF pages at this scale multiplier — produces sharp text at any zoom.
+_RENDER_SCALE = 3.0
 
 
 class PDFViewer(QWidget):
@@ -30,10 +30,24 @@ class PDFViewer(QWidget):
 
         layout.addWidget(self._build_nav())
 
-        QShortcut(QKeySequence(Qt.Key.Key_Left),  self).activated.connect(self._prev_page)
-        QShortcut(QKeySequence(Qt.Key.Key_Right), self).activated.connect(self._next_page)
-        QShortcut(QKeySequence("Ctrl++"),         self).activated.connect(lambda: self._step_zoom(1.25))
-        QShortcut(QKeySequence("Ctrl+-"),         self).activated.connect(lambda: self._step_zoom(1 / 1.25))
+        # WidgetWithChildrenShortcut so they don't fire on other tabs
+        for key, fn in [
+            (Qt.Key.Key_Left,       lambda: self._navigate_page(-1)),
+            (Qt.Key.Key_Right,      lambda: self._navigate_page(1)),
+            (Qt.Key.Key_PageUp,     lambda: self._navigate_page(-1)),
+            (Qt.Key.Key_PageDown,   lambda: self._navigate_page(1)),
+        ]:
+            sc = QShortcut(QKeySequence(key), self)
+            sc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            sc.activated.connect(fn)
+
+        sc_zin = QShortcut(QKeySequence("Ctrl++"), self)
+        sc_zin.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        sc_zin.activated.connect(lambda: self._step_zoom(1.25))
+
+        sc_zout = QShortcut(QKeySequence("Ctrl+-"), self)
+        sc_zout.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        sc_zout.activated.connect(lambda: self._step_zoom(1 / 1.25))
 
     def _build_nav(self) -> QWidget:
         nav = QWidget()
@@ -49,18 +63,21 @@ class PDFViewer(QWidget):
 
         self._btn_prev = QPushButton("◀  Prev")
         self._btn_prev.setEnabled(False)
-        self._btn_prev.clicked.connect(self._prev_page)
+        self._btn_prev.clicked.connect(lambda: self._navigate_page(-1))
         row.addWidget(self._btn_prev)
 
         self._btn_next = QPushButton("Next  ▶")
         self._btn_next.setEnabled(False)
-        self._btn_next.clicked.connect(self._next_page)
+        self._btn_next.clicked.connect(lambda: self._navigate_page(1))
         row.addWidget(self._btn_next)
 
         row.addStretch()
 
         self._page_lbl = QLabel("No document")
-        self._page_lbl.setStyleSheet("color: #c0c0c0;")
+        self._page_lbl.setStyleSheet("color: #c0c0c0; text-decoration: underline;")
+        self._page_lbl.setToolTip("Click to jump to a page")
+        self._page_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._page_lbl.mousePressEvent = lambda _: self._jump_to_page()
         row.addWidget(self._page_lbl)
 
         row.addStretch()
@@ -92,16 +109,21 @@ class PDFViewer(QWidget):
     # ── Public API ───────────────────────────────────────────────────────────
 
     def load(self, path: str):
-        if self._doc:
-            self._doc.close()
-            self._doc = None
+        new_doc = None
         try:
-            self._doc = fitz.open(path)
+            new_doc = fitz.open(path)
         except Exception as exc:
             self._page_lbl.setText(f"Error: {exc}")
             self._btn_prev.setEnabled(False)
             self._btn_next.setEnabled(False)
             return
+        finally:
+            if new_doc is None and self._doc:
+                pass  # keep existing doc open on failure
+
+        if self._doc:
+            self._doc.close()
+        self._doc = new_doc
         self._page_num = 0
         self._view.resetTransform()
         self._view_scale = 1.0
@@ -111,14 +133,11 @@ class PDFViewer(QWidget):
     # ── Internal ─────────────────────────────────────────────────────────────
 
     def _render_page(self):
-        """Re-rasterise the current page at _RENDER_DPI. Does NOT touch the view transform."""
         if not self._doc:
             return
         page = self._doc[self._page_num]
-        mat = fitz.Matrix(_RENDER_DPI, _RENDER_DPI)
+        mat = fitz.Matrix(_RENDER_SCALE, _RENDER_SCALE)
         pix = page.get_pixmap(matrix=mat, alpha=False)
-        # Copy samples into a bytes object so QImage doesn't hold a dangling pointer
-        # when pix is garbage-collected after this scope.
         img = QImage(bytes(pix.samples), pix.width, pix.height,
                      pix.stride, QImage.Format.Format_RGB888)
         pixmap = QPixmap.fromImage(img)
@@ -133,10 +152,8 @@ class PDFViewer(QWidget):
         self._btn_next.setEnabled(self._page_num < total - 1)
 
     def _fit_to_view(self):
-        """Scale the view so the page fills the viewport (reset zoom tracking)."""
         self._view.fitInView(self._scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
-        # Measure actual scale after fitInView so _view_scale stays accurate
-        self._view_scale = self._view.transform().m11() / _RENDER_DPI
+        self._view_scale = self._view.transform().m11() / _RENDER_SCALE
         self._zoom_lbl.setText(f"{int(self._view_scale * 100)}%")
 
     def _step_zoom(self, factor: float):
@@ -144,30 +161,32 @@ class PDFViewer(QWidget):
         self._view_scale *= factor
         self._zoom_lbl.setText(f"{int(self._view_scale * 100)}%")
 
-    def _prev_page(self):
-        if self._doc and self._page_num > 0:
-            self._page_num -= 1
-            current_scale = self._view.transform().m11()
-            self._render_page()
-            self._fit_to_view()
-            # restore previous zoom level
-            ratio = current_scale / self._view.transform().m11()
-            if abs(ratio - 1.0) > 0.01:
-                self._view.scale(ratio, ratio)
-                self._view_scale *= ratio
-                self._zoom_lbl.setText(f"{int(self._view_scale * 100)}%")
+    def _navigate_page(self, delta: int):
+        if not self._doc:
+            return
+        new_page = self._page_num + delta
+        if not (0 <= new_page < len(self._doc)):
+            return
+        self._page_num = new_page
+        current_scale = self._view.transform().m11()
+        self._render_page()
+        self._fit_to_view()
+        ratio = current_scale / self._view.transform().m11()
+        if abs(ratio - 1.0) > 0.01:
+            self._view.scale(ratio, ratio)
+            self._view_scale *= ratio
+            self._zoom_lbl.setText(f"{int(self._view_scale * 100)}%")
 
-    def _next_page(self):
-        if self._doc and self._page_num < len(self._doc) - 1:
-            self._page_num += 1
-            current_scale = self._view.transform().m11()
-            self._render_page()
-            self._fit_to_view()
-            ratio = current_scale / self._view.transform().m11()
-            if abs(ratio - 1.0) > 0.01:
-                self._view.scale(ratio, ratio)
-                self._view_scale *= ratio
-                self._zoom_lbl.setText(f"{int(self._view_scale * 100)}%")
+    def _jump_to_page(self):
+        if not self._doc:
+            return
+        total = len(self._doc)
+        num, ok = QInputDialog.getInt(
+            self, "Go to Page", f"Page number (1 – {total}):",
+            self._page_num + 1, 1, total
+        )
+        if ok:
+            self._navigate_page(num - 1 - self._page_num)
 
     def _wheel_zoom(self, delta: int):
         self._step_zoom(1.15 if delta > 0 else 1 / 1.15)

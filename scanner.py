@@ -25,8 +25,10 @@ def scan_folder(path: str, recursive: bool = True) -> dict:
     if not os.path.isdir(path):
         return result
 
+    _SKIP_NAMES = {"thumbs.db", "desktop.ini", ".ds_store", "ehthumbs.db"}
+
     if recursive:
-        walk_iter = os.walk(path)
+        walk_iter = os.walk(path, followlinks=False)
     else:
         # Yield only the root directory, no subdirs
         try:
@@ -37,6 +39,8 @@ def scan_folder(path: str, recursive: bool = True) -> dict:
 
     for root, _dirs, files in walk_iter:
         for name in files:
+            if name.startswith(".") or name.lower() in _SKIP_NAMES:
+                continue
             ext = os.path.splitext(name)[1].lower()
             full = os.path.join(root, name)
             rel  = os.path.relpath(full, path)   # e.g. "subfolder\img.png" or "img.png"

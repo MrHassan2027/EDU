@@ -3,7 +3,7 @@
 
 import sys
 import os
-import math
+import math  # used by animation tick
 
 
 def resource_path(rel: str) -> str:
@@ -13,19 +13,21 @@ def resource_path(rel: str) -> str:
 
 
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QLabel, QPushButton,
+    QApplication, QMainWindow, QWidget, QLabel, QPushButton, QLineEdit,
     QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem,
     QTabWidget, QFileDialog, QMenu, QSplitter, QColorDialog,
-    QGraphicsDropShadowEffect, QMessageBox, QListView, QTreeView
+    QGraphicsDropShadowEffect, QMessageBox, QListView, QTreeView,
+    QTreeWidget, QTreeWidgetItem
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 from PyQt6.QtGui import QShortcut, QKeySequence, QColor, QIcon
 
-from scanner import scan_folder
+from scanner import scan_folder, IMAGE_EXT, VIDEO_EXT
 from image_viewer import ImageViewer
 from video_player import VideoPlayer
 from pdf_viewer import PDFViewer
 from overlay import DrawingOverlay, ContentArea
+from web_links import WebLinksViewer
 
 
 # ── Pen color presets ────────────────────────────────────────────────────────
@@ -40,14 +42,11 @@ _COLORS = [
 
 _WIDTHS = [("S", 2), ("M", 4), ("L", 8)]
 
-_IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
-_VIDEO_EXT = {".mp4", ".mkv", ".mov", ".avi"}
-
 
 def _media_type(path: str) -> str:
     ext = os.path.splitext(path)[1].lower()
-    if ext in _IMAGE_EXT: return "images"
-    if ext in _VIDEO_EXT: return "videos"
+    if ext in IMAGE_EXT: return "images"
+    if ext in VIDEO_EXT: return "videos"
     return "pdfs"
 
 
@@ -70,6 +69,30 @@ def _make_list(context_menu_cb=None) -> QListWidget:
     return lw
 
 
+def _search_box(placeholder: str) -> QLineEdit:
+    le = QLineEdit()
+    le.setPlaceholderText(placeholder)
+    le.setFixedHeight(22)
+    le.setStyleSheet(
+        "background: #050714; color: #5868a0; border: 1px solid #0e1630;"
+        "border-radius: 3px; padding: 1px 6px; font-size: 11px;"
+    )
+    le.setClearButtonEnabled(True)
+    return le
+
+
+class _ScanWorker(QThread):
+    finished = pyqtSignal(dict)
+
+    def __init__(self, path: str, recursive: bool):
+        super().__init__()
+        self._path = path
+        self._recursive = recursive
+
+    def run(self):
+        self.finished.emit(scan_folder(self._path, recursive=self._recursive))
+
+
 # ── Main Window ───────────────────────────────────────────────────────────────
 
 class MainWindow(QMainWindow):
@@ -86,6 +109,8 @@ class MainWindow(QMainWindow):
         self._playlist: list[str] = []
         self._queue_index: int = -1
         self._recursive: bool = True
+        self._current_filter_folder: str = ""
+        self._scan_worker: _ScanWorker | None = None
 
         root = QWidget()
         self.setCentralWidget(root)
@@ -97,16 +122,20 @@ class MainWindow(QMainWindow):
 
         body = QSplitter(Qt.Orientation.Horizontal)
         body.addWidget(self._build_sidebar())
-        body.addWidget(self._build_content())   # sets self._overlay, self._tabs
+        body.addWidget(self._build_content())
         body.setStretchFactor(0, 0)
         body.setStretchFactor(1, 1)
         body.setSizes([250, 1030])
         root_layout.addWidget(body, 1)
 
-        root_layout.addWidget(self._build_toolbar())  # uses self._overlay
+        root_layout.addWidget(self._build_toolbar())
 
         self._setup_shortcuts()
         self._start_animations()
+
+        # Connect viewer signals
+        self._img_view.load_error.connect(self._status_bar.setText)
+        self._vid_view.playback_finished.connect(self._on_video_finished)
 
     # ── Header ────────────────────────────────────────────────────────────────
 
@@ -163,6 +192,15 @@ class MainWindow(QMainWindow):
         rec_row.addStretch()
         layout.addLayout(rec_row)
 
+        self._folder_tree = QTreeWidget()
+        self._folder_tree.setObjectName("folderTree")
+        self._folder_tree.setHeaderHidden(True)
+        self._folder_tree.setIndentation(14)
+        self._folder_tree.setMaximumHeight(160)
+        self._folder_tree.setVisible(False)
+        self._folder_tree.itemClicked.connect(self._on_tree_selection)
+        layout.addWidget(self._folder_tree)
+
         self._folder_label = QLabel("No folder selected")
         self._folder_label.setStyleSheet("color: #384068; font-size: 11px;")
         self._folder_label.setWordWrap(True)
@@ -172,22 +210,31 @@ class MainWindow(QMainWindow):
 
         self._img_section = _section_label("IMAGES (0)")
         layout.addWidget(self._img_section)
+        self._img_search = _search_box("Filter images…")
+        self._img_search.textChanged.connect(lambda t: self._filter_list(self._img_list, t))
+        layout.addWidget(self._img_search)
         self._img_list = _make_list(self._on_media_context)
-        self._img_list.setMaximumHeight(140)
+        self._img_list.setMaximumHeight(120)
         self._img_list.itemDoubleClicked.connect(lambda item: self._preview_item(item, "images"))
         layout.addWidget(self._img_list)
 
         self._vid_section = _section_label("VIDEOS (0)")
         layout.addWidget(self._vid_section)
+        self._vid_search = _search_box("Filter videos…")
+        self._vid_search.textChanged.connect(lambda t: self._filter_list(self._vid_list, t))
+        layout.addWidget(self._vid_search)
         self._vid_list = _make_list(self._on_media_context)
-        self._vid_list.setMaximumHeight(140)
+        self._vid_list.setMaximumHeight(120)
         self._vid_list.itemDoubleClicked.connect(lambda item: self._preview_item(item, "videos"))
         layout.addWidget(self._vid_list)
 
         self._pdf_section = _section_label("PDFs (0)")
         layout.addWidget(self._pdf_section)
+        self._pdf_search = _search_box("Filter PDFs…")
+        self._pdf_search.textChanged.connect(lambda t: self._filter_list(self._pdf_list, t))
+        layout.addWidget(self._pdf_search)
         self._pdf_list = _make_list(self._on_media_context)
-        self._pdf_list.setMaximumHeight(140)
+        self._pdf_list.setMaximumHeight(120)
         self._pdf_list.itemDoubleClicked.connect(lambda item: self._preview_item(item, "pdfs"))
         layout.addWidget(self._pdf_list)
 
@@ -196,6 +243,8 @@ class MainWindow(QMainWindow):
 
         self._queue_list = _make_list(self._on_queue_context)
         self._queue_list.itemDoubleClicked.connect(self._on_queue_double_click)
+        self._queue_list.setDragDropMode(QListWidget.DragDropMode.InternalMove)
+        self._queue_list.model().rowsMoved.connect(self._on_queue_reordered)
         layout.addWidget(self._queue_list, 1)
 
         # Queue navigation row
@@ -219,6 +268,18 @@ class MainWindow(QMainWindow):
         btn_clear_queue.clicked.connect(self._clear_queue)
         nav_row.addWidget(btn_clear_queue)
 
+        btn_save_q = QPushButton("Save")
+        btn_save_q.setFixedHeight(26)
+        btn_save_q.setToolTip("Save queue to file")
+        btn_save_q.clicked.connect(self._save_queue)
+        nav_row.addWidget(btn_save_q)
+
+        btn_load_q = QPushButton("Load")
+        btn_load_q.setFixedHeight(26)
+        btn_load_q.setToolTip("Load queue from file")
+        btn_load_q.clicked.connect(self._load_queue)
+        nav_row.addWidget(btn_load_q)
+
         layout.addLayout(nav_row)
 
         return sidebar
@@ -231,10 +292,12 @@ class MainWindow(QMainWindow):
         self._img_view = ImageViewer()
         self._vid_view = VideoPlayer()
         self._pdf_view = PDFViewer()
+        self._web_view = WebLinksViewer()
 
         self._tabs.addTab(self._img_view, "Images")
         self._tabs.addTab(self._vid_view, "Videos")
         self._tabs.addTab(self._pdf_view, "PDFs")
+        self._tabs.addTab(self._web_view, "Web Links")
         self._tabs.currentChanged.connect(self._on_tab_changed)
 
         self._overlay = DrawingOverlay()
@@ -256,6 +319,14 @@ class MainWindow(QMainWindow):
         self._btn_pen.setToolTip("Toggle drawing overlay  (draws on Images & PDFs)")
         self._btn_pen.clicked.connect(self._toggle_pen)
         layout.addWidget(self._btn_pen)
+
+        # Eraser (shown when pen is ON)
+        self._btn_eraser = QPushButton("⬜ Eraser")
+        self._btn_eraser.setCheckable(True)
+        self._btn_eraser.setToolTip("Erase drawn strokes")
+        self._btn_eraser.setVisible(False)
+        self._btn_eraser.clicked.connect(self._toggle_eraser)
+        layout.addWidget(self._btn_eraser)
 
         # Color swatches (shown only when pen is ON)
         self._color_widgets: list[QWidget] = []
@@ -294,7 +365,6 @@ class MainWindow(QMainWindow):
             self._color_widgets.append(btn)
             self._width_btns.append(btn)
 
-        # Select medium width as default
         if self._width_btns:
             self._width_btns[1].setChecked(True)
 
@@ -318,6 +388,11 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+L"), self).activated.connect(self._clear_canvas)
         QShortcut(QKeySequence("Ctrl+O"), self).activated.connect(self._on_choose_folder)
         QShortcut(QKeySequence("Ctrl+Z"), self).activated.connect(self._overlay.undo)
+        QShortcut(QKeySequence("Ctrl+Y"), self).activated.connect(self._overlay.redo)
+        QShortcut(QKeySequence("Ctrl+Shift+Z"), self).activated.connect(self._overlay.redo)
+        # Image navigation: Ctrl+Left/Right to avoid conflicts with video/PDF arrows
+        QShortcut(QKeySequence("Ctrl+Left"),  self).activated.connect(lambda: self._navigate_image(-1))
+        QShortcut(QKeySequence("Ctrl+Right"), self).activated.connect(lambda: self._navigate_image(1))
 
     # ── Slots ─────────────────────────────────────────────────────────────────
 
@@ -327,7 +402,6 @@ class MainWindow(QMainWindow):
         dlg.setOption(QFileDialog.Option.ShowDirsOnly, True)
         dlg.setOption(QFileDialog.Option.DontUseNativeDialog, True)
 
-        # Force keyboard focus onto the folder list so typing jumps to matching names
         for view in (dlg.findChild(QListView, "listView"),
                      dlg.findChild(QTreeView, "treeView")):
             if view:
@@ -337,48 +411,104 @@ class MainWindow(QMainWindow):
         if dlg.exec() != QFileDialog.DialogCode.Accepted:
             return
         selected = dlg.selectedFiles()
-        if not selected:
+        if not selected or not selected[0]:
             return
-        folder = selected[0]
-        if not folder:
-            return
-        try:
-            folder = os.path.normpath(folder)
-            mode = "recursive" if self._recursive else "top-level only"
-            self._folder_label.setText(f"{os.path.basename(folder)}  [{mode}]")
-            self._folder_label.setToolTip(folder)
-            self._status_bar.setText(f"Scanning: {folder} …")
-            QApplication.processEvents()
 
-            result = scan_folder(folder, recursive=self._recursive)
-            self._scan_result = result
+        folder = os.path.normpath(selected[0])
+        mode = "recursive" if self._recursive else "top-level only"
+        self._folder_label.setText(f"{os.path.basename(folder)}  [{mode}]")
+        self._folder_label.setToolTip(folder)
+        self._status_bar.setText(f"Scanning: {folder} …")
 
-            self._populate_list(self._img_list, result["images"])
-            self._populate_list(self._vid_list, result["videos"])
-            self._populate_list(self._pdf_list, result["pdfs"])
+        # Cancel any previous scan still running
+        if self._scan_worker and self._scan_worker.isRunning():
+            self._scan_worker.finished.disconnect()
+            self._scan_worker.quit()
 
-            self._img_section.setText(f"IMAGES ({len(result['images'])})")
-            self._vid_section.setText(f"VIDEOS ({len(result['videos'])})")
-            self._pdf_section.setText(f"PDFs ({len(result['pdfs'])})")
+        self._scan_worker = _ScanWorker(folder, self._recursive)
+        self._scan_worker.finished.connect(self._on_scan_done)
+        self._scan_worker.start()
 
-            total = sum(len(v) for v in result.values())
-            self._status_bar.setText(
-                f"Scan complete — {total} files  "
-                f"({len(result['images'])} img  {len(result['videos'])} vid  {len(result['pdfs'])} pdf)"
-            )
-        except Exception as exc:
-            QMessageBox.critical(self, "Scan Error", str(exc))
+    def _on_scan_done(self, result: dict):
+        self._scan_result = result
+        self._current_filter_folder = ""
+        self._build_folder_tree(result)
 
-    def _populate_list(self, lw: QListWidget, entries: list[tuple[str, str]]):
-        """Fill a list widget. entries = [(full_path, rel_path), ...]"""
+        self._populate_list(self._img_list, result["images"])
+        self._populate_list(self._vid_list, result["videos"])
+        self._populate_list(self._pdf_list, result["pdfs"])
+
+        self._img_section.setText(f"IMAGES ({len(result['images'])})")
+        self._vid_section.setText(f"VIDEOS ({len(result['videos'])})")
+        self._pdf_section.setText(f"PDFs ({len(result['pdfs'])})")
+
+        total = sum(len(v) for v in result.values())
+        self._status_bar.setText(
+            f"Scan complete — {total} files  "
+            f"({len(result['images'])} img  {len(result['videos'])} vid  {len(result['pdfs'])} pdf)"
+        )
+
+    def _populate_list(self, lw: QListWidget, entries: list[tuple[str, str]], folder_filter: str = ""):
+        lw.setUpdatesEnabled(False)
         lw.clear()
         for full, rel in entries:
-            # Show relative path so the user knows WHERE the file lives
+            if folder_filter:
+                norm_rel = os.path.normpath(rel)
+                norm_filter = os.path.normpath(folder_filter)
+                if not norm_rel.startswith(norm_filter + os.sep):
+                    continue
             label = rel if rel != os.path.basename(rel) else os.path.basename(rel)
             item = QListWidgetItem(label)
             item.setData(Qt.ItemDataRole.UserRole, full)
             item.setToolTip(full)
             lw.addItem(item)
+        lw.setUpdatesEnabled(True)
+
+    @staticmethod
+    def _filter_list(lw: QListWidget, text: str):
+        text = text.lower()
+        for i in range(lw.count()):
+            item = lw.item(i)
+            item.setHidden(bool(text) and text not in item.text().lower())
+
+    def _build_folder_tree(self, scan_result: dict):
+        self._folder_tree.clear()
+        folders: set[str] = set()
+        for entries in scan_result.values():
+            for _full, rel in entries:
+                parts = os.path.normpath(rel).split(os.sep)
+                for depth in range(1, len(parts)):
+                    folders.add(os.sep.join(parts[:depth]))
+        if not folders:
+            self._folder_tree.setVisible(False)
+            return
+        root_item = QTreeWidgetItem(self._folder_tree, ["All Files"])
+        root_item.setData(0, Qt.ItemDataRole.UserRole, "")
+        node_map: dict[str, QTreeWidgetItem] = {}
+        for folder in sorted(folders):
+            parts = folder.split(os.sep)
+            parent = root_item
+            for depth, part in enumerate(parts):
+                key = os.sep.join(parts[:depth + 1])
+                if key not in node_map:
+                    child = QTreeWidgetItem(parent, [part])
+                    child.setData(0, Qt.ItemDataRole.UserRole, key)
+                    node_map[key] = child
+                parent = node_map[key]
+        self._folder_tree.expandAll()
+        self._folder_tree.setCurrentItem(root_item)
+        self._folder_tree.setVisible(True)
+
+    def _on_tree_selection(self, item: QTreeWidgetItem, _col: int):
+        folder_filter = item.data(0, Qt.ItemDataRole.UserRole)
+        self._current_filter_folder = folder_filter
+        result = self._scan_result
+        self._populate_list(self._img_list, result["images"], folder_filter)
+        self._populate_list(self._vid_list, result["videos"], folder_filter)
+        self._populate_list(self._pdf_list, result["pdfs"], folder_filter)
+        self._img_section.setText(f"IMAGES ({self._img_list.count()})")
+        self._vid_section.setText(f"VIDEOS ({self._vid_list.count()})")
+        self._pdf_section.setText(f"PDFs ({self._pdf_list.count()})")
 
     def _preview_item(self, item: QListWidgetItem, media_type: str):
         tab_index = {"images": 0, "videos": 1, "pdfs": 2}[media_type]
@@ -392,9 +522,24 @@ class MainWindow(QMainWindow):
             self._pdf_view.load(path)
         self._status_bar.setText(f"Loaded: {os.path.basename(path)}")
 
+    def _navigate_image(self, delta: int):
+        if self._tabs.currentIndex() != 0:
+            return
+        current = self._img_list.currentRow()
+        count = self._img_list.count()
+        if count == 0:
+            return
+        next_row = max(0, min(count - 1, current + delta))
+        self._img_list.setCurrentRow(next_row)
+        self._preview_item(self._img_list.currentItem(), "images")
+
     def _on_tab_changed(self, index: int):
         if index != 1:
             self._vid_view.stop()
+
+    def _on_video_finished(self):
+        if self._queue_index >= 0 and self._queue_index < len(self._playlist) - 1:
+            self._queue_next()
 
     def _on_media_context(self, pos):
         sender: QListWidget = self.sender()
@@ -431,12 +576,18 @@ class MainWindow(QMainWindow):
             if path in self._playlist:
                 self._playlist.remove(path)
             self._queue_list.takeItem(row)
-            # Keep _queue_index pointing at the same logical item after removal
             if row < self._queue_index:
                 self._queue_index -= 1
             elif row == self._queue_index:
                 self._queue_index = -1
             self._renumber_queue()
+
+    def _on_queue_reordered(self, *_args):
+        self._playlist = [
+            self._queue_list.item(i).data(Qt.ItemDataRole.UserRole)
+            for i in range(self._queue_list.count())
+        ]
+        self._renumber_queue()
 
     def _renumber_queue(self):
         for i in range(self._queue_list.count()):
@@ -450,6 +601,40 @@ class MainWindow(QMainWindow):
         self._queue_list.clear()
         self._playlist.clear()
         self._queue_index = -1
+
+    def _save_queue(self):
+        if not self._playlist:
+            self._status_bar.setText("Queue is empty — nothing to save")
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Queue", "", "Playlist files (*.txt);;All Files (*)"
+        )
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("\n".join(self._playlist))
+            self._status_bar.setText(f"Queue saved: {os.path.basename(path)}")
+        except OSError as exc:
+            QMessageBox.critical(self, "Save Error", str(exc))
+
+    def _load_queue(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load Queue", "", "Playlist files (*.txt);;All Files (*)"
+        )
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                paths = [ln.strip() for ln in f if ln.strip()]
+            added = 0
+            for p in paths:
+                if os.path.exists(p):
+                    self._add_to_queue(p)
+                    added += 1
+            self._status_bar.setText(f"Loaded {added} items from queue file")
+        except OSError as exc:
+            QMessageBox.critical(self, "Load Error", str(exc))
 
     def _on_queue_double_click(self, item: QListWidgetItem):
         row = self._queue_list.row(item)
@@ -471,7 +656,6 @@ class MainWindow(QMainWindow):
         index = max(0, min(index, len(self._playlist) - 1))
         self._queue_index = index
 
-        # Highlight current row
         self._queue_list.setCurrentRow(index)
 
         path = self._playlist[index]
@@ -490,7 +674,7 @@ class MainWindow(QMainWindow):
             f"Queue [{index + 1}/{len(self._playlist)}]: {os.path.basename(path)}"
         )
 
-    # ── Pen controls ──────────────────────────────────────────────────────────
+    # ── Pen / Eraser controls ─────────────────────────────────────────────────
 
     def _toggle_recursive(self, checked: bool):
         self._recursive = checked
@@ -499,14 +683,26 @@ class MainWindow(QMainWindow):
     def _toggle_pen(self, checked: bool):
         self._overlay.set_active(checked)
         self._btn_pen.setText("✏  Pen: ON" if checked else "✏  Pen: OFF")
+        self._btn_eraser.setVisible(checked)
+        if not checked:
+            self._btn_eraser.setChecked(False)
+            self._overlay.set_eraser(False)
         for w in self._color_widgets:
             w.setVisible(checked)
         self._status_bar.setText(
-            "Pen ON — draw freely; Ctrl+Z to undo, Ctrl+L to clear" if checked else "Pen OFF"
+            "Pen ON — draw freely; Ctrl+Z undo, Ctrl+Y redo, Ctrl+L clear" if checked else "Pen OFF"
         )
+
+    def _toggle_eraser(self, checked: bool):
+        self._overlay.set_eraser(checked)
+        self._btn_eraser.setText("⬜ Eraser: ON" if checked else "⬜ Eraser")
+        self._status_bar.setText("Eraser ON — drag to erase" if checked else "Pen mode")
 
     def _set_pen_color(self, color: QColor):
         self._overlay.set_color(color)
+        self._btn_eraser.setChecked(False)
+        self._overlay.set_eraser(False)
+        self._btn_eraser.setText("⬜ Eraser")
         self._status_bar.setText(f"Pen color: {color.name()}")
 
     def _pick_custom_color(self):
@@ -532,7 +728,6 @@ class MainWindow(QMainWindow):
     # ── Animations ────────────────────────────────────────────────────────────
 
     def _start_animations(self):
-        # Drop-shadow glow on the LIVE dot (real pixel glow, not just color)
         self._live_glow = QGraphicsDropShadowEffect()
         self._live_glow.setBlurRadius(14)
         self._live_glow.setColor(QColor(233, 69, 96, 200))
@@ -542,21 +737,18 @@ class MainWindow(QMainWindow):
         self._anim_phase = 0.0
         self._anim_timer = QTimer(self)
         self._anim_timer.timeout.connect(self._tick_animations)
-        self._anim_timer.start(40)  # ~25 fps — smooth but light on CPU
+        self._anim_timer.start(40)
 
     def _tick_animations(self):
         self._anim_phase = (self._anim_phase + 0.13) % (2 * math.pi)
-        t = (math.sin(self._anim_phase) + 1) / 2  # 0 → 1 → 0
+        t = (math.sin(self._anim_phase) + 1) / 2
 
-        # Pulse LIVE dot: dark red → bright pink
-        r = int(233 + t * 22)          # 233 – 255
-        g = int(69  + t * 50)          # 69  – 119
-        b = int(96  + t * 40)          # 96  – 136
+        r = int(233 + t * 22)
+        g = int(69  + t * 50)
+        b = int(96  + t * 40)
         self._live_dot.setStyleSheet(
             f"color: rgb({r},{g},{b}); font-weight: bold; font-size: 13px;"
         )
-
-        # Pulse the glow blur radius: 6 → 22 px
         self._live_glow.setBlurRadius(6 + t * 16)
         self._live_glow.setColor(QColor(r, g, b, int(140 + t * 115)))
 
@@ -570,8 +762,11 @@ def main():
 
     qss_path = resource_path("style.qss")
     if os.path.exists(qss_path):
-        with open(qss_path, "r", encoding="utf-8") as f:
-            app.setStyleSheet(f.read())
+        try:
+            with open(qss_path, "r", encoding="utf-8") as f:
+                app.setStyleSheet(f.read())
+        except OSError as exc:
+            print(f"Warning: could not load stylesheet: {exc}")
 
     window = MainWindow()
     window.show()
