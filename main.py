@@ -3,6 +3,7 @@
 
 import sys
 import os
+import json
 import math  # used by animation tick
 
 
@@ -23,6 +24,8 @@ from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 from PyQt6.QtGui import QShortcut, QKeySequence, QColor, QIcon
 
 from scanner import scan_folder, IMAGE_EXT, VIDEO_EXT
+
+_SESSION_PATH = os.path.join(os.path.expanduser("~"), ".edu_viewer", "session.json")
 from image_viewer import ImageViewer
 from video_player import VideoPlayer
 from pdf_viewer import PDFViewer
@@ -111,6 +114,7 @@ class MainWindow(QMainWindow):
         self._recursive: bool = True
         self._current_filter_folder: str = ""
         self._scan_worker: _ScanWorker | None = None
+        self._last_folder: str = ""
 
         root = QWidget()
         self.setCentralWidget(root)
@@ -136,6 +140,8 @@ class MainWindow(QMainWindow):
         # Connect viewer signals
         self._img_view.load_error.connect(self._status_bar.setText)
         self._vid_view.playback_finished.connect(self._on_video_finished)
+
+        self._restore_session()
 
     # ── Header ────────────────────────────────────────────────────────────────
 
@@ -417,6 +423,7 @@ class MainWindow(QMainWindow):
             return
 
         folder = os.path.normpath(selected[0])
+        self._last_folder = folder
         mode = "recursive" if self._recursive else "top-level only"
         self._folder_label.setText(f"{os.path.basename(folder)}  [{mode}]")
         self._folder_label.setToolTip(folder)
@@ -722,7 +729,57 @@ class MainWindow(QMainWindow):
         self._overlay.clear()
         self._status_bar.setText("Canvas cleared")
 
+    # ── Session persistence ───────────────────────────────────────────────────
+
+    def _save_session(self):
+        data = {
+            "folder": self._last_folder,
+            "recursive": self._recursive,
+            "tab": self._tabs.currentIndex(),
+            "queue": list(self._playlist),
+        }
+        try:
+            os.makedirs(os.path.dirname(_SESSION_PATH), exist_ok=True)
+            with open(_SESSION_PATH, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except OSError:
+            pass
+
+    def _restore_session(self):
+        if not os.path.exists(_SESSION_PATH):
+            return
+        try:
+            with open(_SESSION_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            return
+
+        recursive = data.get("recursive", True)
+        self._recursive = recursive
+        self._btn_recursive.setChecked(recursive)
+        self._btn_recursive.setText("Recursive: ON" if recursive else "Recursive: OFF")
+
+        tab = data.get("tab", 0)
+        if 0 <= tab < self._tabs.count():
+            self._tabs.setCurrentIndex(tab)
+
+        for path in data.get("queue", []):
+            if os.path.exists(path):
+                self._add_to_queue(path)
+
+        folder = data.get("folder", "")
+        if folder and os.path.isdir(folder):
+            self._last_folder = folder
+            mode = "recursive" if recursive else "top-level only"
+            self._folder_label.setText(f"{os.path.basename(folder)}  [{mode}]")
+            self._folder_label.setToolTip(folder)
+            self._status_bar.setText(f"Restoring: {folder} …")
+            self._scan_worker = _ScanWorker(folder, recursive)
+            self._scan_worker.finished.connect(self._on_scan_done)
+            self._scan_worker.start()
+
     def closeEvent(self, event):
+        self._save_session()
         self._anim_timer.stop()
         self._vid_view.stop()
         super().closeEvent(event)
